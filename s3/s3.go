@@ -15,6 +15,10 @@ What happens if you CTRL-C a multipart upload
 Doesn't support v2 signing so can't interface with Ceph
   * http://tracker.ceph.com/issues/10333
   * https://github.com/aws/aws-sdk-go/issues/291
+  * a v2 signer to look at
+  * https://github.com/smartystreets/go-aws-auth/blob/master/sign2.go
+  * The current v4 signer
+   * github.com/aws/aws-sdk-go/internal/signer/v4/v4.go
 
 */
 
@@ -22,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"path"
 	"regexp"
 	"strings"
@@ -35,6 +38,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/ncw/rclone/fs"
 	"github.com/ncw/swift"
+	"github.com/smartystreets/go-aws-auth"
 )
 
 // Register with Fs
@@ -208,7 +212,21 @@ func s3Connection(name string) (*s3.S3, error) {
 		WithHTTPClient(fs.Config.Client())
 	c := s3.New(awsConfig)
 	if region == "other-v2-signature" {
-		log.Fatal("Sorry v2 signatures not supported yet :-(")
+		fs.Debug(name, "Using v2 auth")
+		creds := awsauth.Credentials{
+			AccessKeyID:     accessKeyId,
+			SecretAccessKey: secretAccessKey,
+		}
+		signer := func(req *aws.Request) {
+			// Ignore AnonymousCredentials object
+			if req.Service.Config.Credentials == credentials.AnonymousCredentials {
+				return
+			}
+			awsauth.Sign(req.HTTPRequest, creds)
+		}
+		c.Handlers.Sign.Clear()
+		c.Handlers.Sign.PushBack(aws.BuildContentLength)
+		c.Handlers.Sign.PushBack(signer)
 	}
 	return c, nil
 }
